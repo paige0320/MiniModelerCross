@@ -1,0 +1,265 @@
+MiniModeler / MiniModelerCross project history
+Generated: 2026-05-11
+
+Goal
+----
+The goal started as learning how to write shader/rendering code and show a 3D cube. Because the machine is macOS on Apple Silicon, the initial Windows/Visual Studio + HLSL + Direct3D path was replaced with macOS-friendly Metal. Later, the goal expanded into a small modeling-program prototype that can also run on Windows and use Dear ImGui for editor UI.
+
+Phase 1: Direction choice
+-------------------------
+1. Explained that HLSL + Direct3D is a Windows path and is not the best fit for macOS M1.
+2. Recommended Xcode + Metal + Metal Shading Language for native macOS shader/rendering learning.
+3. Explained that a small modeling program is realistic if built in stages: viewport, cube, camera, scene objects, transforms, selection, then editing tools.
+
+Phase 2: Native macOS prototype, MiniModeler
+-------------------------------------------
+Created /Users/chenpinyu/MiniModeler as a Swift Package macOS app.
+
+Files created:
+- Package.swift
+- Sources/MiniModeler/main.swift
+- Sources/MiniModeler/ModelingView.swift
+- Sources/MiniModeler/Renderer.swift
+- Sources/MiniModeler/Math.swift
+- Sources/MiniModeler/Scene.swift
+- Sources/MiniModeler/MeshFactory.swift
+- Sources/MiniModeler/Shaders.swift
+- README.md
+
+Implemented:
+- AppKit window.
+- MTKView-based Metal viewport.
+- Basic Metal renderer.
+- Perspective camera.
+- Grid lines.
+- A colored 3D cube.
+- Mouse controls for orbit, pan, and zoom.
+- Keyboard controls:
+  - a: add cube
+  - delete: delete last cube
+  - r: reset camera
+
+Build/debug work:
+- Found that full Xcode was not active at first; xcodebuild pointed to Command Line Tools.
+- Built using Swift Package Manager.
+- Fixed Swift 6 main actor issues by marking Renderer as @MainActor.
+- Removed incorrect linkedFramework("simd") from Package.swift.
+- Added an executable product to Package.swift so Xcode could recognize the run target more reliably.
+- Fixed a SwiftPM/Xcode manifest cache issue caused by a stale ManifestLoading file in ~/Library/Caches/org.swift.swiftpm/manifests.
+
+Phase 3: Cross-platform direction
+---------------------------------
+Explained that Swift + AppKit + Metal is macOS-only. For Windows compatibility and Dear ImGui integration, the project needed a C++ cross-platform stack.
+
+Chosen stack:
+- C++17
+- CMake
+- GLFW
+- OpenGL 2
+- Dear ImGui
+
+Reasoning:
+- Dear ImGui is C++.
+- GLFW gives a cross-platform window/input layer.
+- OpenGL 2 avoids extra OpenGL loader setup for the first cross-platform prototype.
+- CMake lets Visual Studio on Windows and Xcode/command line on macOS open/build the same project.
+
+Phase 4: Cross-platform prototype, MiniModelerCross
+---------------------------------------------------
+Created /Users/chenpinyu/MiniModelerCross.
+
+Files created:
+- CMakeLists.txt
+- src/main.cpp
+- README.md
+- .gitignore
+
+Implemented:
+- CMake FetchContent setup for GLFW and Dear ImGui.
+- Dear ImGui static library target.
+- GLFW window.
+- OpenGL 2 rendering.
+- Dear ImGui editor panel.
+- 3D grid.
+- Cube drawing.
+- Object list.
+- Transform controls.
+- Material color control.
+- Camera orbit/pan/zoom.
+- Add/delete cube.
+- ImGui demo toggle.
+
+Tools installed/used:
+- Homebrew was already installed.
+- Installed CMake with brew install cmake.
+- Used CMake to configure and build:
+  - cmake -S . -B build
+  - cmake --build build
+- Verified MiniModelerCross executable could launch.
+
+Phase 5: Selection and JSON scene files
+---------------------------------------
+Added:
+- Left-click object selection using ray casting against each object's local bounds.
+- Yellow outline for selected object.
+- Scene JSON save/load.
+- Cmd/Ctrl + S for save.
+- Cmd/Ctrl + O for load.
+- ImGui path input for scene file name.
+
+Notes:
+- The first selection version used cube bounds because the app still only had cube geometry.
+- JSON parsing was kept as a small local parser to avoid adding another dependency.
+
+Phase 6: Mesh-based modeling foundation
+---------------------------------------
+Refactored MiniModelerCross from cube-only drawing to a mesh-based prototype.
+
+New concepts added in src/main.cpp:
+- Vec2
+- Vec3
+- Vertex
+- Mesh
+- MeshType
+- Material
+- SceneObject
+- Camera
+- Light
+- AppState
+
+Preset mesh generators added:
+- Cube
+- Plane
+- UV sphere
+- Cylinder
+
+Renderer improvements:
+- Mesh surfaces are drawn from vertices and triangle indices.
+- Vertex normals are used for OpenGL fixed-function lighting.
+- Directional light controls were added.
+- Ambient light and light intensity controls were added.
+- Wireframe overlay was generalized for all mesh types.
+- Procedural checker texture was generated in code and can be toggled per object.
+
+Editor UI improvements:
+- Buttons to add Cube, Plane, Sphere, and Cylinder.
+- Object list shows object name and mesh type.
+- Transform controls remain position/rotation/scale.
+- Material controls now include base color and checker texture toggle.
+- Light controls include direction, color, intensity, and ambient.
+- Render toggles include grid, wireframe, lighting, and ImGui demo.
+
+Scene JSON updates:
+- Saves and loads mesh type.
+- Saves and loads material base color.
+- Saves and loads checker texture flag.
+- Saves and loads light settings.
+- Keeps camera save/load.
+
+Current limitations
+-------------------
+- The renderer still uses OpenGL 2 fixed-function mode for simplicity.
+- Texture support is currently procedural checker texture only, not image-file loading.
+- Object-mode selection uses local bounding boxes.
+- Edit-mode face selection uses ray/triangle picking on the selected object's mesh.
+- Edit mode is a first version and does not yet have Blender-style topology tools.
+- There is no transform gizmo yet.
+- There is no undo/redo yet.
+- There is no OBJ or glTF import/export yet.
+
+Recommended next milestones
+---------------------------
+1. Split src/main.cpp into modules:
+   - Math
+   - Mesh
+   - Scene
+   - Renderer
+   - UI
+   - Serialization
+2. Add exact object-level ray/triangle picking.
+3. Add a transform gizmo.
+4. Add welded/shared vertex topology for cleaner edit behavior.
+5. Add real texture loading, likely with stb_image.
+6. Add OBJ export.
+7. Move renderer from OpenGL 2 to OpenGL 3.3+ or another modern backend.
+
+Phase 7: First Edit Mode
+------------------------
+Added a first usable mesh edit mode to MiniModelerCross.
+
+Implemented:
+- Each SceneObject now owns its own Mesh copy instead of only referencing a shared primitive mesh.
+- Edit Mode toggle in the Dear ImGui panel.
+- Keyboard shortcut:
+  - E: toggle Edit Mode
+- Selection modes:
+  - Vertex
+  - Edge
+  - Face
+- Left click behavior:
+  - Object Mode: selects whole objects.
+  - Edit Mode: selects the active mesh element type on the selected object.
+- Vertex editing:
+  - selected vertex is highlighted.
+  - selected vertex local position can be edited with ImGui DragFloat3.
+- Edge editing:
+  - selected edge is highlighted.
+  - both edge endpoint local positions can be edited.
+- Face editing:
+  - selected triangle face is highlighted.
+  - Push + / Push - moves the face along its face normal.
+- Mesh recalculation:
+  - normals are recalculated after edits.
+  - local bounds are recalculated after edits.
+- JSON persistence:
+  - saved scene JSON now includes edited vertex positions.
+  - loading restores vertex positions when the saved vertex count matches the primitive mesh.
+
+Important limitation:
+- The current primitives use per-face or generated vertices, not fully welded topology. This means editing a cube corner may move only the selected face's copy of that corner instead of every adjacent face. The next topology milestone is vertex welding / shared vertex topology.
+
+Latest verification after Phase 7:
+- Rebuilt successfully with:
+  - cmake --build build
+- Launched successfully with:
+  - ./build/MiniModelerCross
+- The test launch was then closed so no extra MiniModelerCross process remained running.
+
+Current run command:
+- cd ~/MiniModelerCross
+- ./build/MiniModelerCross
+
+Current basic workflow:
+1. Add or select an object in Object Mode.
+2. Press E or enable Edit Mode in the ImGui panel.
+3. Choose Vertex, Edge, or Face selection mode.
+4. Left-click an element in the viewport.
+5. Edit the selected vertex/edge values in the ImGui panel, or push/pull the selected face.
+6. Use Save JSON to persist the edited scene.
+
+Tools and skills used
+---------------------
+- Terminal shell commands through zsh.
+- File inspection with sed and git status.
+- File edits with apply_patch.
+- Swift Package Manager for the native macOS prototype.
+- Xcode project/package troubleshooting.
+- CMake for cross-platform project generation.
+- Homebrew for installing CMake.
+- GLFW for cross-platform window/input.
+- Dear ImGui for editor-style UI.
+- OpenGL fixed-function rendering for the cross-platform prototype.
+- Basic 3D math:
+  - vectors
+  - dot product
+  - cross product
+  - normalization
+  - camera basis
+  - ray casting
+  - local object transforms
+- Basic mesh generation:
+  - cube
+  - plane
+  - UV sphere
+  - cylinder
+- Basic scene serialization using JSON text.
