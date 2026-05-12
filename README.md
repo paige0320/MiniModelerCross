@@ -57,6 +57,7 @@ build\Debug\MiniModelerCross.exe
 
 - Left drag: orbit camera
 - Left click: select object
+- Object Mode: drag colored transform gizmo axes to move or rotate the selected object
 - Right drag: pan camera
 - Scroll: zoom
 - `A`: add cube
@@ -78,6 +79,7 @@ The Dear ImGui panel lets you:
 - Import OBJ meshes with the Import panel
 - Select objects
 - Edit mode for selecting vertices, edges, and faces
+- Object mode transform gizmo with Move and Rotate tools
 - Move selected vertices or edge endpoints
 - Push/pull selected faces along their face normal
 - Edit position, rotation, and scale
@@ -94,7 +96,7 @@ The Dear ImGui panel lets you:
 
 Useful next milestones:
 
-- True FBX import through Assimp or Autodesk FBX SDK
+- True FBX import/export through Assimp, or Autodesk FBX SDK if its license/build workflow is acceptable
 - Transform gizmo
 - Drag selected objects in the viewport
 - Welding shared vertices for cleaner mesh editing
@@ -110,6 +112,8 @@ assets/sample_pyramid.obj
 ```
 
 Texture loading currently supports uncompressed 24-bit `.bmp` files. This keeps the prototype dependency-light and portable; PNG/JPG support should be added later with `stb_image`.
+
+FBX is not hand-parsed in this project. Autodesk provides the FBX SDK for FBX import/export, but it is an SDK rather than a simple open-source plugin. For this project's CMake/open-source style, Assimp is the better next integration target because it supports FBX plus many other formats behind one API.
 
 ## Lighting Logic
 

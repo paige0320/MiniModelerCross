@@ -78,6 +78,18 @@ enum class EditSelectionMode {
     Face = 2
 };
 
+enum class TransformTool {
+    Move = 0,
+    Rotate = 1
+};
+
+enum class GizmoAxis {
+    None = 0,
+    X = 1,
+    Y = 2,
+    Z = 3
+};
+
 struct Material {
     Color baseColor;
     bool useCheckerTexture = false;
@@ -120,6 +132,10 @@ struct AppState {
     bool showGrid = true;
     bool showWireframe = true;
     bool lightingEnabled = true;
+    bool showGizmo = true;
+    TransformTool transformTool = TransformTool::Move;
+    GizmoAxis activeGizmoAxis = GizmoAxis::None;
+    bool draggingGizmo = false;
     bool editMode = false;
     EditSelectionMode editSelectionMode = EditSelectionMode::Vertex;
     int selectedVertex = -1;
@@ -1193,6 +1209,83 @@ static void pickObject(double mouseX, double mouseY, int width, int height) {
     }
 }
 
+static void viewportRay(double mouseX, double mouseY, int width, int height, Vec3& origin, Vec3& direction) {
+    Vec3 forward;
+    Vec3 right;
+    Vec3 up;
+    cameraBasis(origin, forward, right, up);
+
+    const float aspect = static_cast<float>(width) / static_cast<float>(std::max(height, 1));
+    const float fovScale = std::tan(radians(55.0f) * 0.5f);
+    const float ndcX = (2.0f * static_cast<float>(mouseX) / static_cast<float>(std::max(width, 1)) - 1.0f) * aspect * fovScale;
+    const float ndcY = (1.0f - 2.0f * static_cast<float>(mouseY) / static_cast<float>(std::max(height, 1))) * fovScale;
+    direction = normalize(forward + right * ndcX + up * ndcY);
+}
+
+static Vec3 axisVector(GizmoAxis axis) {
+    switch (axis) {
+        case GizmoAxis::X: return {1.0f, 0.0f, 0.0f};
+        case GizmoAxis::Y: return {0.0f, 1.0f, 0.0f};
+        case GizmoAxis::Z: return {0.0f, 0.0f, 1.0f};
+        case GizmoAxis::None: break;
+    }
+    return {0.0f, 0.0f, 0.0f};
+}
+
+static GizmoAxis pickTransformGizmo(double mouseX, double mouseY, int width, int height) {
+    if (!gApp.showGizmo || gApp.editMode || gApp.objects.empty()) {
+        return GizmoAxis::None;
+    }
+
+    Vec3 rayOrigin;
+    Vec3 rayDirection;
+    viewportRay(mouseX, mouseY, width, height, rayOrigin, rayDirection);
+
+    const SceneObject& object = gApp.objects[gApp.selectedIndex];
+    const Vec3 origin = object.position;
+    const GizmoAxis axes[] = {GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z};
+
+    GizmoAxis bestAxis = GizmoAxis::None;
+    float bestDistance = 0.11f;
+    float bestRayT = std::numeric_limits<float>::infinity();
+    for (GizmoAxis axis : axes) {
+        const Vec3 direction = axisVector(axis);
+        const Vec3 start = origin - direction * 0.15f;
+        const Vec3 end = origin + direction * 1.45f;
+        float rayT = 0.0f;
+        const float distance = distanceRayToSegment(rayOrigin, rayDirection, start, end, rayT);
+        if (distance < bestDistance && rayT < bestRayT) {
+            bestDistance = distance;
+            bestRayT = rayT;
+            bestAxis = axis;
+        }
+    }
+
+    return bestAxis;
+}
+
+static void applyGizmoDrag(double dx, double dy) {
+    if (!gApp.draggingGizmo || gApp.activeGizmoAxis == GizmoAxis::None || gApp.objects.empty()) {
+        return;
+    }
+
+    SceneObject& object = gApp.objects[gApp.selectedIndex];
+    const float combinedDelta = static_cast<float>(dx - dy);
+    if (gApp.transformTool == TransformTool::Move) {
+        const Vec3 movement = axisVector(gApp.activeGizmoAxis) * (combinedDelta * 0.01f);
+        object.position += movement;
+    } else {
+        const float rotationDelta = combinedDelta * 0.45f;
+        if (gApp.activeGizmoAxis == GizmoAxis::X) {
+            object.rotation.x += rotationDelta;
+        } else if (gApp.activeGizmoAxis == GizmoAxis::Y) {
+            object.rotation.y += rotationDelta;
+        } else if (gApp.activeGizmoAxis == GizmoAxis::Z) {
+            object.rotation.z += rotationDelta;
+        }
+    }
+}
+
 static void createCheckerTexture() {
     constexpr int textureSize = 64;
     unsigned char pixels[textureSize * textureSize * 3] = {};
@@ -1266,6 +1359,78 @@ static void drawAxes(float length = 2.0f) {
     glEnd();
     glPointSize(1.0f);
     glLineWidth(1.0f);
+}
+
+static void setAxisColor(GizmoAxis axis, bool active) {
+    const float boost = active ? 1.0f : 0.78f;
+    if (axis == GizmoAxis::X) {
+        glColor3f(0.95f * boost, 0.12f * boost, 0.12f * boost);
+    } else if (axis == GizmoAxis::Y) {
+        glColor3f(0.18f * boost, 0.90f * boost, 0.22f * boost);
+    } else if (axis == GizmoAxis::Z) {
+        glColor3f(0.16f * boost, 0.45f * boost, 1.0f * boost);
+    }
+}
+
+static void drawCircle(Vec3 center, GizmoAxis axis, float radius) {
+    glBegin(GL_LINE_LOOP);
+    for (int i = 0; i < 96; ++i) {
+        const float angle = static_cast<float>(i) / 96.0f * 2.0f * 3.1415926535f;
+        const float c = std::cos(angle) * radius;
+        const float s = std::sin(angle) * radius;
+        if (axis == GizmoAxis::X) {
+            glVertex3f(center.x, center.y + c, center.z + s);
+        } else if (axis == GizmoAxis::Y) {
+            glVertex3f(center.x + c, center.y, center.z + s);
+        } else if (axis == GizmoAxis::Z) {
+            glVertex3f(center.x + c, center.y + s, center.z);
+        }
+    }
+    glEnd();
+}
+
+static void drawTransformGizmo() {
+    if (!gApp.showGizmo || gApp.editMode || gApp.objects.empty()) {
+        return;
+    }
+
+    const Vec3 origin = gApp.objects[gApp.selectedIndex].position;
+    const GizmoAxis axes[] = {GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z};
+
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_DEPTH_TEST);
+    glLineWidth(5.0f);
+
+    if (gApp.transformTool == TransformTool::Move) {
+        glBegin(GL_LINES);
+        for (GizmoAxis axis : axes) {
+            setAxisColor(axis, axis == gApp.activeGizmoAxis);
+            const Vec3 direction = axisVector(axis);
+            const Vec3 end = origin + direction * 1.35f;
+            glVertex3f(origin.x, origin.y, origin.z);
+            glVertex3f(end.x, end.y, end.z);
+        }
+        glEnd();
+
+        glPointSize(11.0f);
+        glBegin(GL_POINTS);
+        for (GizmoAxis axis : axes) {
+            setAxisColor(axis, axis == gApp.activeGizmoAxis);
+            const Vec3 end = origin + axisVector(axis) * 1.35f;
+            glVertex3f(end.x, end.y, end.z);
+        }
+        glEnd();
+        glPointSize(1.0f);
+    } else {
+        for (GizmoAxis axis : axes) {
+            setAxisColor(axis, axis == gApp.activeGizmoAxis);
+            drawCircle(origin, axis, 1.15f);
+        }
+    }
+
+    glLineWidth(1.0f);
+    glEnable(GL_DEPTH_TEST);
 }
 
 static void applyObjectTransform(const SceneObject& object) {
@@ -1483,6 +1648,7 @@ static void renderScene(int width, int height) {
     for (int i = 0; i < static_cast<int>(gApp.objects.size()); ++i) {
         drawObject(gApp.objects[i], i == gApp.selectedIndex);
     }
+    drawTransformGizmo();
 }
 
 static Vec3 faceNormal(const Mesh& mesh, int triangleIndex) {
@@ -1559,6 +1725,17 @@ static void drawUi() {
     ImGui::SeparatorText("Mode");
     if (ImGui::Checkbox("Edit Mode", &gApp.editMode)) {
         clearEditSelection();
+        gApp.draggingGizmo = false;
+        gApp.activeGizmoAxis = GizmoAxis::None;
+    }
+    if (!gApp.editMode) {
+        ImGui::Checkbox("Show Transform Gizmo", &gApp.showGizmo);
+        const char* transformTools[] = {"Move", "Rotate"};
+        int currentTool = static_cast<int>(gApp.transformTool);
+        if (ImGui::Combo("Transform Tool", &currentTool, transformTools, 2)) {
+            gApp.transformTool = static_cast<TransformTool>(currentTool);
+            gApp.activeGizmoAxis = GizmoAxis::None;
+        }
     }
     if (gApp.editMode) {
         const char* modes[] = {"Vertex", "Edge", "Face"};
@@ -1659,6 +1836,7 @@ static void drawUi() {
 
     ImGui::Text("Left drag: orbit");
     ImGui::Text(gApp.editMode ? "Left click: select mesh element" : "Left click: select object");
+    ImGui::Text("Object Mode gizmo: drag colored axes");
     ImGui::Text("Right drag: pan");
     ImGui::Text("Scroll: zoom");
     ImGui::End();
@@ -1684,14 +1862,22 @@ static void mouseButtonCallback(GLFWwindow* window, int button, int action, int 
 
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (action == GLFW_PRESS) {
-            gApp.leftDragging = true;
             gApp.mouseDownX = x;
             gApp.mouseDownY = y;
+            int width = 0;
+            int height = 0;
+            glfwGetWindowSize(window, &width, &height);
+            gApp.activeGizmoAxis = pickTransformGizmo(x, y, width, height);
+            gApp.draggingGizmo = gApp.activeGizmoAxis != GizmoAxis::None;
+            gApp.leftDragging = !gApp.draggingGizmo;
         } else if (action == GLFW_RELEASE) {
+            const bool wasDraggingGizmo = gApp.draggingGizmo;
             gApp.leftDragging = false;
+            gApp.draggingGizmo = false;
+            gApp.activeGizmoAxis = GizmoAxis::None;
             const double dx = x - gApp.mouseDownX;
             const double dy = y - gApp.mouseDownY;
-            if (dx * dx + dy * dy < 25.0) {
+            if (!wasDraggingGizmo && dx * dx + dy * dy < 25.0) {
                 int width = 0;
                 int height = 0;
                 glfwGetWindowSize(window, &width, &height);
@@ -1723,7 +1909,9 @@ static void cursorPositionCallback(GLFWwindow* window, double x, double y) {
     gApp.lastMouseX = x;
     gApp.lastMouseY = y;
 
-    if (gApp.leftDragging) {
+    if (gApp.draggingGizmo) {
+        applyGizmoDrag(dx, dy);
+    } else if (gApp.leftDragging) {
         gApp.camera.yaw -= static_cast<float>(dx) * 0.35f;
         gApp.camera.pitch += static_cast<float>(dy) * 0.35f;
         gApp.camera.pitch = std::clamp(gApp.camera.pitch, -85.0f, 85.0f);

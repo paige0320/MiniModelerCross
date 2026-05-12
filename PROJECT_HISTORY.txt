@@ -352,6 +352,44 @@ How to test Phase 9 features:
    - Z blue
 6. To test image texture loading, prepare an uncompressed 24-bit BMP file, enter its path in the Material panel, press Load BMP Texture, then enable Use Image Texture.
 
+Phase 10: Blender-like mode clarity and first transform gizmo
+-------------------------------------------------------------
+Added the first interactive object transform gizmo and documented the FBX importer direction.
+
+Implemented:
+- Object Mode / Edit Mode behavior is now clearer:
+  - Object Mode is for whole-object selection and transform.
+  - Edit Mode is for selecting/editing vertices, edges, and faces.
+- Object Mode transform gizmo:
+  - Show Transform Gizmo checkbox.
+  - Transform Tool combo:
+    - Move
+    - Rotate
+  - Colored axes:
+    - X red
+    - Y green
+    - Z blue
+  - Left-drag a colored axis to update the selected object's transform live.
+  - Move tool changes object.position along the selected global axis.
+  - Rotate tool changes object.rotation around the selected global axis.
+- Viewport behavior:
+  - If a gizmo axis is clicked, dragging edits the object transform.
+  - If no gizmo axis is clicked, left-drag still orbits the camera.
+  - Edit Mode keeps the existing vertex/edge/face picking workflow.
+
+FBX research and decision:
+- Autodesk provides an FBX SDK for import/export workflows, but it is not a small open-source plugin that can simply be dropped into this repo.
+- For an open CMake-based tool, Assimp is the more practical next dependency because it supports many formats, including FBX, behind one import/export API.
+- Recommended next FBX milestone:
+  - Add Assimp through CMake FetchContent or a package manager.
+  - Replace the first OBJ-only importer path with an Assimp importer path.
+  - Add export through Assimp after imported scene meshes and materials are stable.
+
+Limitations of Phase 10:
+- Gizmo axes currently use global/world axes, not Blender's local/global toggle.
+- Rotation gizmo rendering is visual-first; picking still uses axis proximity, not true ring intersection.
+- There is no snapping, numeric axis lock, or transform history yet.
+
 Tools and skills used
 ---------------------
 - Terminal shell commands through zsh.
