@@ -68,7 +68,8 @@ enum class MeshType {
     Cube = 0,
     Plane = 1,
     Sphere = 2,
-    Cylinder = 3
+    Cylinder = 3,
+    Imported = 4
 };
 
 enum class EditSelectionMode {
@@ -80,6 +81,9 @@ enum class EditSelectionMode {
 struct Material {
     Color baseColor;
     bool useCheckerTexture = false;
+    bool useImageTexture = false;
+    std::string texturePath;
+    unsigned int textureId = 0;
 };
 
 struct SceneObject {
@@ -129,6 +133,8 @@ struct AppState {
     double mouseDownX = 0.0;
     double mouseDownY = 0.0;
     char scenePath[260] = "scene.json";
+    char importPath[260] = "model.obj";
+    char texturePath[260] = "texture.bmp";
     std::string status = "Ready";
     unsigned int checkerTexture = 0;
 };
@@ -187,6 +193,7 @@ static const char* meshTypeName(MeshType type) {
         case MeshType::Plane: return "Plane";
         case MeshType::Sphere: return "Sphere";
         case MeshType::Cylinder: return "Cylinder";
+        case MeshType::Imported: return "Imported";
     }
     return "Cube";
 }
@@ -200,6 +207,9 @@ static MeshType meshTypeFromName(const std::string& name) {
     }
     if (name == "Cylinder") {
         return MeshType::Cylinder;
+    }
+    if (name == "Imported") {
+        return MeshType::Imported;
     }
     return MeshType::Cube;
 }
@@ -297,6 +307,10 @@ static void buildMeshes() {
     gApp.meshes[meshIndex(MeshType::Plane)] = makePlaneMesh();
     gApp.meshes[meshIndex(MeshType::Sphere)] = makeSphereMesh();
     gApp.meshes[meshIndex(MeshType::Cylinder)] = makeCylinderMesh();
+}
+
+static bool isPrimitiveMesh(MeshType type) {
+    return type != MeshType::Imported;
 }
 
 static void recalculateMesh(Mesh& mesh) {
@@ -400,6 +414,172 @@ static void resetCamera() {
     gApp.camera = Camera{};
 }
 
+static bool loadBmpTexture(const std::string& path, unsigned int& textureId) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        gApp.status = "Failed to open texture " + path;
+        return false;
+    }
+
+    unsigned char header[54] = {};
+    input.read(reinterpret_cast<char*>(header), sizeof(header));
+    if (!input || header[0] != 'B' || header[1] != 'M') {
+        gApp.status = "Texture must be a 24-bit BMP file";
+        return false;
+    }
+
+    const int dataOffset = *reinterpret_cast<int*>(&header[10]);
+    const int width = *reinterpret_cast<int*>(&header[18]);
+    const int rawHeight = *reinterpret_cast<int*>(&header[22]);
+    const short bitsPerPixel = *reinterpret_cast<short*>(&header[28]);
+    const int compression = *reinterpret_cast<int*>(&header[30]);
+    if (width <= 0 || rawHeight == 0 || bitsPerPixel != 24 || compression != 0) {
+        gApp.status = "Only uncompressed 24-bit BMP textures are supported";
+        return false;
+    }
+
+    const int height = std::abs(rawHeight);
+    const int rowStride = ((width * 3 + 3) / 4) * 4;
+    std::vector<unsigned char> row(static_cast<size_t>(rowStride));
+    std::vector<unsigned char> pixels(static_cast<size_t>(width * height * 3));
+
+    input.seekg(dataOffset, std::ios::beg);
+    for (int y = 0; y < height; ++y) {
+        input.read(reinterpret_cast<char*>(row.data()), rowStride);
+        const int targetY = rawHeight > 0 ? (height - 1 - y) : y;
+        for (int x = 0; x < width; ++x) {
+            const size_t source = static_cast<size_t>(x * 3);
+            const size_t target = static_cast<size_t>((targetY * width + x) * 3);
+            pixels[target + 0] = row[source + 2];
+            pixels[target + 1] = row[source + 1];
+            pixels[target + 2] = row[source + 0];
+        }
+    }
+
+    if (textureId == 0) {
+        glGenTextures(1, &textureId);
+    }
+    glBindTexture(GL_TEXTURE_2D, textureId);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+    gApp.status = "Loaded texture " + path;
+    return true;
+}
+
+static bool parseObjFaceToken(const std::string& token, int& positionIndex, int& uvIndex, int& normalIndex) {
+    positionIndex = 0;
+    uvIndex = 0;
+    normalIndex = 0;
+
+    const size_t firstSlash = token.find('/');
+    if (firstSlash == std::string::npos) {
+        positionIndex = std::atoi(token.c_str());
+        return positionIndex != 0;
+    }
+
+    positionIndex = std::atoi(token.substr(0, firstSlash).c_str());
+    const size_t secondSlash = token.find('/', firstSlash + 1);
+    if (secondSlash == std::string::npos) {
+        uvIndex = std::atoi(token.substr(firstSlash + 1).c_str());
+    } else {
+        const std::string uvText = token.substr(firstSlash + 1, secondSlash - firstSlash - 1);
+        if (!uvText.empty()) {
+            uvIndex = std::atoi(uvText.c_str());
+        }
+        normalIndex = std::atoi(token.substr(secondSlash + 1).c_str());
+    }
+
+    return positionIndex != 0;
+}
+
+template <typename T>
+static const T& objAt(const std::vector<T>& values, int oneBasedIndex, const T& fallback) {
+    if (oneBasedIndex > 0 && oneBasedIndex <= static_cast<int>(values.size())) {
+        return values[static_cast<size_t>(oneBasedIndex - 1)];
+    }
+    return fallback;
+}
+
+static bool importObj(const std::string& path) {
+    std::ifstream input(path);
+    if (!input) {
+        gApp.status = "Failed to open OBJ " + path;
+        return false;
+    }
+
+    std::vector<Vec3> positions;
+    std::vector<Vec2> uvs;
+    std::vector<Vec3> normals;
+    Mesh mesh;
+    const Vec3 fallbackPosition = {0.0f, 0.0f, 0.0f};
+    const Vec2 fallbackUv = {0.0f, 0.0f};
+    const Vec3 fallbackNormal = {0.0f, 1.0f, 0.0f};
+
+    std::string line;
+    while (std::getline(input, line)) {
+        std::stringstream stream(line);
+        std::string tag;
+        stream >> tag;
+        if (tag == "v") {
+            Vec3 position;
+            stream >> position.x >> position.y >> position.z;
+            positions.push_back(position);
+        } else if (tag == "vt") {
+            Vec2 uv;
+            stream >> uv.x >> uv.y;
+            uvs.push_back(uv);
+        } else if (tag == "vn") {
+            Vec3 normal;
+            stream >> normal.x >> normal.y >> normal.z;
+            normals.push_back(normalize(normal));
+        } else if (tag == "f") {
+            std::vector<unsigned int> faceIndices;
+            std::string token;
+            while (stream >> token) {
+                int positionIndex = 0;
+                int uvIndex = 0;
+                int normalIndex = 0;
+                if (!parseObjFaceToken(token, positionIndex, uvIndex, normalIndex)) {
+                    continue;
+                }
+
+                Vertex vertex;
+                vertex.position = objAt(positions, positionIndex, fallbackPosition);
+                vertex.uv = objAt(uvs, uvIndex, fallbackUv);
+                vertex.normal = objAt(normals, normalIndex, fallbackNormal);
+                faceIndices.push_back(static_cast<unsigned int>(mesh.vertices.size()));
+                mesh.vertices.push_back(vertex);
+            }
+
+            for (size_t i = 1; i + 1 < faceIndices.size(); ++i) {
+                mesh.indices.insert(mesh.indices.end(), {faceIndices[0], faceIndices[i], faceIndices[i + 1]});
+            }
+        }
+    }
+
+    if (mesh.vertices.empty() || mesh.indices.empty()) {
+        gApp.status = "OBJ has no supported mesh data";
+        return false;
+    }
+
+    recalculateMesh(mesh);
+    SceneObject object;
+    object.meshType = MeshType::Imported;
+    object.mesh = mesh;
+    object.name = "Imported OBJ " + std::to_string(gApp.objects.size() + 1);
+    object.position = {0.0f, 0.6f, 0.0f};
+    object.material.baseColor = {0.78f, 0.78f, 0.72f};
+    gApp.objects.push_back(object);
+    gApp.selectedIndex = static_cast<int>(gApp.objects.size()) - 1;
+    clearEditSelection();
+    gApp.status = "Imported OBJ " + path;
+    return true;
+}
+
 static std::string escapeJson(const std::string& text) {
     std::string escaped;
     for (char character : text) {
@@ -443,11 +623,21 @@ static void saveScene() {
         output << "      \"scale\": [" << object.scale.x << ", " << object.scale.y << ", " << object.scale.z << "],\n";
         output << "      \"color\": [" << object.material.baseColor.r << ", " << object.material.baseColor.g << ", " << object.material.baseColor.b << "],\n";
         output << "      \"checkerTexture\": " << (object.material.useCheckerTexture ? "true" : "false") << ",\n";
+        output << "      \"imageTexture\": " << (object.material.useImageTexture ? "true" : "false") << ",\n";
+        output << "      \"texturePath\": \"" << escapeJson(object.material.texturePath) << "\",\n";
         output << "      \"vertices\": [";
         for (size_t vertexIndex = 0; vertexIndex < object.mesh.vertices.size(); ++vertexIndex) {
             const Vec3& position = object.mesh.vertices[vertexIndex].position;
             output << "[" << position.x << ", " << position.y << ", " << position.z << "]";
             if (vertexIndex + 1 != object.mesh.vertices.size()) {
+                output << ", ";
+            }
+        }
+        output << "],\n";
+        output << "      \"indices\": [";
+        for (size_t index = 0; index < object.mesh.indices.size(); ++index) {
+            output << object.mesh.indices[index];
+            if (index + 1 != object.mesh.indices.size()) {
                 output << ", ";
             }
         }
@@ -569,6 +759,35 @@ public:
         return false;
     }
 
+    bool readUIntArray(std::vector<unsigned int>& values) {
+        values.clear();
+        if (!findNext('[')) {
+            return false;
+        }
+
+        while (position_ < text_.size()) {
+            while (position_ < text_.size() && (std::isspace(static_cast<unsigned char>(text_[position_])) || text_[position_] == ',')) {
+                ++position_;
+            }
+            if (position_ < text_.size() && text_[position_] == ']') {
+                ++position_;
+                return true;
+            }
+            if (position_ >= text_.size() || !std::isdigit(static_cast<unsigned char>(text_[position_]))) {
+                return false;
+            }
+
+            char* end = nullptr;
+            const unsigned long value = std::strtoul(text_.c_str() + position_, &end, 10);
+            if (end == text_.c_str() + position_) {
+                return false;
+            }
+            values.push_back(static_cast<unsigned int>(value));
+            position_ = static_cast<size_t>(end - text_.c_str());
+        }
+        return false;
+    }
+
     std::string readObjectBlock() {
         if (!findNext('{')) {
             return {};
@@ -683,7 +902,9 @@ static void loadScene() {
                 objectJson.readString(meshName);
             }
             object.meshType = meshTypeFromName(meshName);
-            object.mesh = gApp.meshes[meshIndex(object.meshType)];
+            if (isPrimitiveMesh(object.meshType)) {
+                object.mesh = gApp.meshes[meshIndex(object.meshType)];
+            }
             if (object.name.empty()) {
                 object.name = std::string(meshTypeName(object.meshType)) + " " + std::to_string(loaded.size() + 1);
             }
@@ -702,11 +923,32 @@ static void loadScene() {
             if (objectJson.findKey("checkerTexture")) {
                 objectJson.readBool(object.material.useCheckerTexture);
             }
+            if (objectJson.findKey("imageTexture")) {
+                objectJson.readBool(object.material.useImageTexture);
+            }
+            if (objectJson.findKey("texturePath")) {
+                objectJson.readString(object.material.texturePath);
+                if (!object.material.texturePath.empty()) {
+                    loadBmpTexture(object.material.texturePath, object.material.textureId);
+                }
+            }
             std::vector<Vec3> savedVertices;
-            if (objectJson.findKey("vertices") && objectJson.readVec3Array(savedVertices) && savedVertices.size() == object.mesh.vertices.size()) {
+            if (objectJson.findKey("vertices") && objectJson.readVec3Array(savedVertices) && (object.meshType == MeshType::Imported || savedVertices.size() == object.mesh.vertices.size())) {
+                if (object.meshType == MeshType::Imported) {
+                    object.mesh.vertices.clear();
+                    for (const Vec3& position : savedVertices) {
+                        object.mesh.vertices.push_back({position, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}});
+                    }
+                }
                 for (size_t vertexIndex = 0; vertexIndex < savedVertices.size(); ++vertexIndex) {
                     object.mesh.vertices[vertexIndex].position = savedVertices[vertexIndex];
                 }
+            }
+            std::vector<unsigned int> savedIndices;
+            if (objectJson.findKey("indices") && objectJson.readUIntArray(savedIndices) && !savedIndices.empty()) {
+                object.mesh.indices = savedIndices;
+            }
+            if (!object.mesh.vertices.empty() && !object.mesh.indices.empty()) {
                 recalculateMesh(object.mesh);
             }
             loaded.push_back(object);
@@ -997,6 +1239,35 @@ static void drawGrid(float size, int divisions) {
     glEnd();
 }
 
+static void drawAxes(float length = 2.0f) {
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glLineWidth(4.0f);
+    glBegin(GL_LINES);
+    glColor3f(0.9f, 0.12f, 0.12f);
+    glVertex3f(0.0f, 0.02f, 0.0f);
+    glVertex3f(length, 0.02f, 0.0f);
+    glColor3f(0.18f, 0.85f, 0.22f);
+    glVertex3f(0.0f, 0.02f, 0.0f);
+    glVertex3f(0.0f, length, 0.0f);
+    glColor3f(0.16f, 0.45f, 1.0f);
+    glVertex3f(0.0f, 0.02f, 0.0f);
+    glVertex3f(0.0f, 0.02f, length);
+    glEnd();
+
+    glPointSize(8.0f);
+    glBegin(GL_POINTS);
+    glColor3f(0.9f, 0.12f, 0.12f);
+    glVertex3f(length, 0.02f, 0.0f);
+    glColor3f(0.18f, 0.85f, 0.22f);
+    glVertex3f(0.0f, length, 0.0f);
+    glColor3f(0.16f, 0.45f, 1.0f);
+    glVertex3f(0.0f, 0.02f, length);
+    glEnd();
+    glPointSize(1.0f);
+    glLineWidth(1.0f);
+}
+
 static void applyObjectTransform(const SceneObject& object) {
     glTranslatef(object.position.x, object.position.y, object.position.z);
     glRotatef(object.rotation.x, 1.0f, 0.0f, 0.0f);
@@ -1012,7 +1283,10 @@ static void drawMeshSurface(const Mesh& mesh, const SceneObject& object) {
         glDisable(GL_LIGHTING);
     }
 
-    if (object.material.useCheckerTexture) {
+    if (object.material.useImageTexture && object.material.textureId != 0) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, object.material.textureId);
+    } else if (object.material.useCheckerTexture) {
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, gApp.checkerTexture);
     } else {
@@ -1202,6 +1476,7 @@ static void renderScene(int width, int height) {
 
     if (gApp.showGrid) {
         drawGrid(10.0f, 20);
+        drawAxes(2.0f);
         setupLighting();
     }
 
@@ -1275,6 +1550,12 @@ static void drawUi() {
     ImGui::Checkbox("Lighting", &gApp.lightingEnabled);
     ImGui::Checkbox("ImGui Demo", &gApp.showDemoWindow);
 
+    ImGui::SeparatorText("Import");
+    ImGui::InputText("OBJ Path", gApp.importPath, sizeof(gApp.importPath));
+    if (ImGui::Button("Import OBJ")) {
+        importObj(gApp.importPath);
+    }
+
     ImGui::SeparatorText("Mode");
     if (ImGui::Checkbox("Edit Mode", &gApp.editMode)) {
         clearEditSelection();
@@ -1318,6 +1599,15 @@ static void drawUi() {
         ImGui::SeparatorText("Material");
         ImGui::ColorEdit3("Base Color", &object.material.baseColor.r);
         ImGui::Checkbox("Checker Texture", &object.material.useCheckerTexture);
+        ImGui::InputText("BMP Texture", gApp.texturePath, sizeof(gApp.texturePath));
+        if (ImGui::Button("Load BMP Texture")) {
+            if (loadBmpTexture(gApp.texturePath, object.material.textureId)) {
+                object.material.texturePath = gApp.texturePath;
+                object.material.useImageTexture = true;
+                object.material.useCheckerTexture = false;
+            }
+        }
+        ImGui::Checkbox("Use Image Texture", &object.material.useImageTexture);
 
         if (gApp.editMode) {
             ImGui::SeparatorText("Edit Selection");

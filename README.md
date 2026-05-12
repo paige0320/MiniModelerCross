@@ -75,6 +75,7 @@ The Dear ImGui panel lets you:
 
 - Add and delete cubes
 - Add preset meshes: cube, plane, sphere, cylinder
+- Import OBJ meshes with the Import panel
 - Select objects
 - Edit mode for selecting vertices, edges, and faces
 - Move selected vertices or edge endpoints
@@ -82,6 +83,7 @@ The Dear ImGui panel lets you:
 - Edit position, rotation, and scale
 - Change material base color
 - Toggle a procedural checker texture per object
+- Load 24-bit uncompressed BMP textures per object
 - Edit directional light color, intensity, ambient, and direction
 - Save and load `scene.json`
 - Toggle the grid
@@ -92,8 +94,31 @@ The Dear ImGui panel lets you:
 
 Useful next milestones:
 
+- True FBX import through Assimp or Autodesk FBX SDK
 - Transform gizmo
 - Drag selected objects in the viewport
 - Welding shared vertices for cleaner mesh editing
-- Real image texture loading
+- More image formats through stb_image
 - OBJ or glTF export
+
+## Import And Texture Notes
+
+OBJ import is available from the `Import` panel. Try:
+
+```text
+assets/sample_pyramid.obj
+```
+
+Texture loading currently supports uncompressed 24-bit `.bmp` files. This keeps the prototype dependency-light and portable; PNG/JPG support should be added later with `stb_image`.
+
+## Lighting Logic
+
+The current renderer uses OpenGL fixed-function lighting, which is equivalent to a simple shader model:
+
+```text
+finalColor = textureOrBaseColor * (ambient + diffuse) + specular
+diffuse = max(dot(normal, lightDirection), 0) * lightColor * intensity
+specular = pow(max(dot(viewDirection, reflectedLight), 0), shininess)
+```
+
+In a modern shader version, the vertex shader would transform position/normal into view or world space, and the fragment shader would compute ambient, diffuse, texture sampling, and specular lighting per pixel.

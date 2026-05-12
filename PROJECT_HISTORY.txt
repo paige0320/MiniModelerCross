@@ -279,6 +279,47 @@ Windows workflow after push:
 5. Run:
    - build\Debug\MiniModelerCross.exe
 
+Phase 9: Import, axes, and texture material support
+---------------------------------------------------
+Added more modeling-tool features to MiniModelerCross.
+
+Implemented:
+- World coordinate axes:
+  - X axis is red.
+  - Y axis is green.
+  - Z axis is blue.
+  - Axes are drawn with the grid as viewport orientation hints.
+- OBJ importer:
+  - Added an Import panel with an OBJ path input.
+  - Supports common OBJ records:
+    - v
+    - vt
+    - vn
+    - f
+  - Triangulates polygon faces with a fan method.
+  - Creates an Imported scene object with its own Mesh.
+  - Added a sample file:
+    - assets/sample_pyramid.obj
+- Material image texture support:
+  - Added BMP texture path input in the Material panel.
+  - Loads uncompressed 24-bit BMP files.
+  - Stores texture path and image texture toggle in scene JSON.
+  - Keeps the procedural checker texture as a lightweight fallback/test texture.
+
+FBX importer note:
+- A real FBX importer should use Assimp or Autodesk FBX SDK. FBX is too complex and version-heavy for a small hand-written parser. OBJ import was added first as the same workflow category: bringing an external mesh into the editor.
+
+Lighting/shader logic note:
+- The current prototype still uses OpenGL fixed-function lighting rather than handwritten GLSL/HLSL shader files.
+- The math is equivalent to a simple material shader:
+  - ambient = materialColor * ambientAmount
+  - diffuse = materialColorOrTexture * max(dot(normal, lightDirection), 0) * lightColor * intensity
+  - specular = pow(max(dot(viewDirection, reflectedLight), 0), shininess) * specularColor
+  - finalColor = ambient + diffuse + specular
+- In a modern shader renderer:
+  - vertex shader transforms mesh position and normal by model/view/projection matrices.
+  - fragment shader samples the material texture, combines it with base color, then applies ambient/diffuse/specular lighting per pixel.
+
 Tools and skills used
 ---------------------
 - Terminal shell commands through zsh.
