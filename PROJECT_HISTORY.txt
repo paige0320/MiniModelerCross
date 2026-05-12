@@ -320,6 +320,38 @@ Lighting/shader logic note:
   - vertex shader transforms mesh position and normal by model/view/projection matrices.
   - fragment shader samples the material texture, combines it with base color, then applies ambient/diffuse/specular lighting per pixel.
 
+Verification after Phase 9:
+- Rebuilt successfully with:
+  - cmake --build build
+- Launched successfully with:
+  - ./build/MiniModelerCross
+- Committed and pushed to GitHub:
+  - f468964 Add OBJ import axes and BMP textures
+
+Windows update steps after Phase 9:
+1. Open Command Prompt or PowerShell.
+2. Go to the cloned repo:
+   - cd C:\Users\paige900320\Documents\GitHub\MiniModelerCross
+3. Pull latest changes:
+   - git pull
+4. Build:
+   - cmake -S . -B build
+   - cmake --build build --config Debug
+5. Run:
+   - build\Debug\MiniModelerCross.exe
+
+How to test Phase 9 features:
+1. In the app, find the Import panel.
+2. Enter:
+   - assets/sample_pyramid.obj
+3. Press Import OBJ.
+4. Confirm the imported pyramid appears in the viewport and object list.
+5. Use the grid to confirm the coordinate axes:
+   - X red
+   - Y green
+   - Z blue
+6. To test image texture loading, prepare an uncompressed 24-bit BMP file, enter its path in the Material panel, press Load BMP Texture, then enable Use Image Texture.
+
 Tools and skills used
 ---------------------
 - Terminal shell commands through zsh.
