@@ -237,6 +237,45 @@ Current basic workflow:
 5. Edit the selected vertex/edge values in the ImGui panel, or push/pull the selected face.
 6. Use Save JSON to persist the edited scene.
 
+Phase 8: GitHub preparation
+---------------------------
+Prepared MiniModelerCross for GitHub sync.
+
+Implemented locally:
+- Initialized /Users/chenpinyu/MiniModelerCross as its own independent Git repository.
+- Confirmed it is no longer using /Users/chenpinyu as the Git root.
+- Added project files:
+  - .gitignore
+  - CMakeLists.txt
+  - PROJECT_HISTORY.txt
+  - README.md
+  - src/main.cpp
+- Created the first local commit:
+  - Initial MiniModelerCross prototype
+- Renamed the default branch to:
+  - main
+
+GitHub status:
+- GitHub login available through the connector:
+  - paige0320
+- No existing GitHub repository named MiniModelerCross was found.
+- Next step is to create an empty GitHub repository, then add it as origin and push main.
+
+Recommended remote setup after creating the GitHub repo:
+- git remote add origin https://github.com/paige0320/MiniModelerCross.git
+- git push -u origin main
+
+Windows workflow after push:
+1. Install Visual Studio 2022.
+2. Include Desktop development with C++ and CMake tools for Windows.
+3. Clone:
+   - git clone https://github.com/paige0320/MiniModelerCross.git
+4. Open the cloned folder in Visual Studio, or build with:
+   - cmake -S . -B build
+   - cmake --build build --config Debug
+5. Run:
+   - build\Debug\MiniModelerCross.exe
+
 Tools and skills used
 ---------------------
 - Terminal shell commands through zsh.
